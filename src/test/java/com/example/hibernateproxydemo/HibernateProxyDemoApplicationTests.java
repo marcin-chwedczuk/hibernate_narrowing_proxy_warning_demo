@@ -1,7 +1,12 @@
 package com.example.hibernateproxydemo;
 
 import com.example.hibernateproxydemo.model.Person;
+import com.example.hibernateproxydemo.model.houses.House;
 import com.example.hibernateproxydemo.model.houses.SingleFamilyDetachedHouse;
+import com.example.hibernateproxydemo.model.legacysystem.Comment;
+import com.example.hibernateproxydemo.model.legacysystem.ExtendedUser;
+import com.example.hibernateproxydemo.model.legacysystem.LegacyDocument;
+import com.example.hibernateproxydemo.model.legacysystem.LegacyUser;
 import com.example.hibernateproxydemo.model.pets.Cat;
 import com.example.hibernateproxydemo.model.pets.Pet;
 import org.assertj.core.api.Condition;
@@ -17,8 +22,7 @@ import org.springframework.test.context.junit4.SpringRunner;
 
 import javax.persistence.EntityManager;
 import javax.persistence.PersistenceContext;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -104,6 +108,126 @@ public class HibernateProxyDemoApplicationTests {
         assertThat(pet4.getName())
                 .isEqualTo("new-gerard-name");
 	}
+
+	@Test
+    public void demo_lazyLoading_proxy_behaviour() {
+
+	    Person alice = entityManager.find(Person.class, aliceId);
+        House aliceHouse = alice.getHouse();
+
+        assertThat(aliceHouse)
+                .is(hibernateProxy())
+                .is(uninitialized());
+
+        logger.info("Load Bob from database...");
+
+        Person bob = entityManager.createQuery(
+                    "select p from Person p join fetch p.house where p.id = :id",
+                    Person.class)
+                .setParameter("id", bobId)
+                .getSingleResult();
+
+        assertThat(bob.getHouse())
+                .isSameAs(aliceHouse);
+
+        logger.info("Load actual house...");
+        // HHH000179: Narrowing proxy to class SingleFamilyDetachedHouse - this operation breaks ==
+        SingleFamilyDetachedHouse house =
+                entityManager.find(SingleFamilyDetachedHouse.class, bob.getHouse().getId());
+
+    }
+
+    @Test
+    public void demo_narrowing_proxy_warning_in_real_world() {
+	    // Setup the stage:
+        ExtendedUser joe = new ExtendedUser();
+        joe.setUserPreference3("red-theme-color");
+        entityManager.persist(joe);
+
+        // simulate transaction commit
+        entityManager.flush();
+        entityManager.clear();
+
+        Long documentId = null;
+        {
+            // 1) In the legacy part of the system we have code
+            // that uses LegacyUser entity, e.g.
+            LegacyUser currentUser = entityManager.find(LegacyUser.class, joe.getId());
+
+            LegacyDocument document = new LegacyDocument();
+            document.setOwner(currentUser);
+            document.setContents("GOTO Statement Considered Harmful");
+            entityManager.persist(document);
+
+            documentId = document.getId();
+
+            entityManager.flush();
+            entityManager.clear();
+        }
+
+        {
+            // 2) In the new part of the system we operate mostly using ExtendedUser
+            // entity:
+
+            ExtendedUser currentUser = entityManager.find(ExtendedUser.class, joe.getId());
+            LegacyDocument existingDocument = entityManager.find(LegacyDocument.class, documentId);
+
+            Comment comment = new Comment();
+            comment.setAuthor(currentUser);
+            comment.setDocument(existingDocument);
+            comment.setContents("+1");
+            entityManager.persist(comment);
+
+            entityManager.flush();
+            entityManager.clear();
+        }
+
+        {
+            // 3) In the *new* part of the system we load document and it's comments
+
+            LegacyDocument document = entityManager.find(LegacyDocument.class, documentId);
+
+            // we load some data from document owner
+            LegacyUser documentOwner = document.getOwner();
+            String ownerPreference1 = documentOwner.getUserPreference1();
+
+            logger.info("Load comments...");
+            // HHH000179: Narrowing proxy to class ExtendedUser - this operation breaks ==
+            // When Hibernate loads comment that has field of type ExtendedUser with
+            // the same Id as LegacyUser it realizes that documentOwner is indeed ExtendedUser.
+            // So this time Hibernate could figure out that it generated wrong proxy
+            // without querying DB.
+            List<Comment> comments = entityManager.createQuery(
+                        "select c from Comment c where c.document.id = :docId",
+                        Comment.class)
+                    .setParameter("docId", document.getId())
+                    .getResultList();
+
+            logger.info("Iterate comments...");
+            for(Comment comment: comments) {
+                if (comment.getAuthor().getId().equals(documentOwner.getId())) {
+                    logger.info("Some work...");
+                }
+            }
+
+            // Now the most interesting part
+            ExtendedUser commentAuthor = comments.get(0).getAuthor();
+
+            assertThat(commentAuthor)
+                    .isNotSameAs(documentOwner);
+
+            assertThat(commentAuthor.getId())
+                    .isEqualTo(documentOwner.getId());
+
+            // Now without overloading hashCode()/equals() we may
+            // expect troubles...
+            Set<LegacyUser> users = new HashSet<>();
+            users.add(commentAuthor);
+            users.add(documentOwner);
+
+            assertThat(users).hasSize(2);
+        }
+    }
 
 	private Condition<Object> hibernateProxy() {
         return new Condition<Object>() {
