@@ -13,8 +13,8 @@ import java.util.UUID;
 public abstract class BaseEntity {
 
     @Id
-    @Type(type="pg-uuid")
-    @Column(/* for H2: columnDefinition = "BINARY(16)",*/ updatable = false, nullable = false)
+    // for postgresql: @Type(type="pg-uuid")
+    @Column(/* for H2: */ columnDefinition = "BINARY(16)", updatable = false, nullable = false)
     private UUID id;
 
     @Version
@@ -39,6 +39,7 @@ public abstract class BaseEntity {
         this.version = version;
     }
 
+    //*
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -56,4 +57,5 @@ public abstract class BaseEntity {
     public int hashCode() {
         return getId().hashCode();
     }
+    // */
 }

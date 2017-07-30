@@ -42,7 +42,7 @@ public class HibernateProxyDemoApplication {
 
         @Override
         public void run(String... args) throws Exception {
-
+            System.out.println("RUN TESTS TO SEE EXAMPLES!");
         }
     }
 }

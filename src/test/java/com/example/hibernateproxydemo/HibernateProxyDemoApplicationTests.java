@@ -9,9 +9,13 @@ import com.example.hibernateproxydemo.model.legacysystem.LegacyDocument;
 import com.example.hibernateproxydemo.model.legacysystem.LegacyUser;
 import com.example.hibernateproxydemo.model.pets.Cat;
 import com.example.hibernateproxydemo.model.pets.Pet;
+import javassist.ClassPool;
+import javassist.CtClass;
+import javassist.NotFoundException;
 import org.assertj.core.api.Condition;
 import org.assertj.core.description.Description;
 import org.hibernate.proxy.HibernateProxy;
+import org.hibernate.proxy.ProxyFactory;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -74,13 +78,16 @@ public class HibernateProxyDemoApplicationTests {
 
 	    assertThat(pet)
                 .is(hibernateProxy())
-                .is(uninitialized());
+                .is(uninitialized())
+                .isInstanceOf(Pet.class)
+                .isNotInstanceOf(Cat.class);
 
 	    // initialize proxy
 	    logger.info("Pet is a cat: " + pet.makeNoise());
 
 	    assertThat(pet)
-                .isNot(uninitialized());
+                .isNot(uninitialized())
+                .isNotInstanceOf(Cat.class);
 
 	    Pet pet2 = entityManager.getReference(Pet.class, gerardId);
 	    assertThat(pet2)
@@ -104,9 +111,29 @@ public class HibernateProxyDemoApplicationTests {
         // be recognized as equal.
 
         // All proxies now refer to Cat entity.
-        pet2.setName("new-gerard-name");
-        assertThat(pet4.getName())
-                .isEqualTo("new-gerard-name");
+        assertThat(pet.getName())
+                .isEqualTo("gerard");
+
+        assertThat(pet)
+                .isNotSameAs(pet3);
+
+        pet3.setName("proton");
+
+        assertThat(pet.getName())
+                .isEqualTo("proton");
+
+        // Troubles with HashSet's
+        // Comment hashCode()/equals() in Base entity to make this
+        // test pass:
+        /*
+        Person alice = entityManager.find(Person.class, aliceId);
+
+        assertThat(alice.getPets().contains(pet))
+                .isFalse();
+
+        assertThat(alice.getPets().contains(pet3))
+                .isTrue();
+        // */
 	}
 
 	@Test
